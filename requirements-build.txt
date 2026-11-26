@@ -1,0 +1,3 @@
+Pillow==12.3.0
+rembg[cpu]==2.0.88
+pyinstaller==6.22.3

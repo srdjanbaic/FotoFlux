@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=FotoFlux
+GenericName=Photo Editor
+Comment=Photo editing with filters and AI selective blur
+Exec=fotoflux
+Icon=fotoflux
+Terminal=false
+Categories=Graphics;Photography;
+StartupWMClass=FotoFlux
