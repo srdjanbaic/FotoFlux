@@ -10,7 +10,7 @@ import threading
 
 
 APP_NAME = "FotoFlux"
-VERSION = "1.0"
+VERSION = "1.0.1"
 
 
 class FotoFlux:
@@ -24,6 +24,7 @@ class FotoFlux:
         self.original = None
         self.current = None
         self.base_image = None
+        self.right_effect_base = None
         self.preview_image = None
         self.undo_stack = []
         self.image_path = None
@@ -205,7 +206,7 @@ class FotoFlux:
 
         version = tk.Label(
             topbar,
-            text="PHOTO EDITOR  •  VERSION 1.0",
+            text="PHOTO EDITOR  •  VERSION 1.0.1",
             font=("Sans", 9),
             fg="#a7adc4",
             bg="#1d2030"
@@ -857,6 +858,7 @@ class FotoFlux:
             self.original = image.copy()
             self.current = image.copy()
             self.base_image = image.copy()
+            self.right_effect_base = None
             self.image_path = path
             self._image_revision += 1
 
@@ -926,9 +928,25 @@ class FotoFlux:
         if self.current is not None:
             self._image_revision += 1
 
-            self.undo_stack.append(
-                self.current.copy()
-            )
+            self.undo_stack.append({
+                "current": self.current.copy(),
+                "base_image": (
+                    self.base_image.copy()
+                    if self.base_image is not None else None
+                ),
+                "right_effect_base": (
+                    self.right_effect_base.copy()
+                    if self.right_effect_base is not None else None
+                ),
+                "sliders": (
+                    self.brightness.get(),
+                    self.contrast.get(),
+                    self.saturation.get(),
+                    self.sharpness.get(),
+                    self.blur.get(),
+                    self.temperature.get()
+                )
+            })
 
             if len(self.undo_stack) > 20:
                 self.undo_stack.pop(0)
@@ -938,19 +956,27 @@ class FotoFlux:
         if not self.undo_stack:
             return
 
-        self.current = self.undo_stack.pop()
+        self.cancel_pending_preview()
+        state = self.undo_stack.pop()
 
-        self.base_image = self.current.copy()
-
+        self.current = state["current"]
+        self.base_image = state["base_image"]
+        self.right_effect_base = state["right_effect_base"]
         self.preview_image = None
 
-        self.reset_slider_values()
+        self._updating_sliders = True
+        try:
+            self.brightness.set(state["sliders"][0])
+            self.contrast.set(state["sliders"][1])
+            self.saturation.set(state["sliders"][2])
+            self.sharpness.set(state["sliders"][3])
+            self.blur.set(state["sliders"][4])
+            self.temperature.set(state["sliders"][5])
+        finally:
+            self._updating_sliders = False
 
-        self.update_display()
-
-        self.status.config(
-            text="Undo completed"
-        )
+        self.update_live_preview()
+        self.status.config(text="Undo completed")
 
     # --------------------------------------------------
     # ADJUSTMENTS
@@ -1104,9 +1130,12 @@ class FotoFlux:
         self.cancel_pending_preview()
         self.save_undo()
 
-        self.current = self.adjust_image(
-            self.current
-        )
+        self.current = self.adjust_image(self.current)
+
+        if self.right_effect_base is not None:
+            self.right_effect_base = self.adjust_image(
+                self.right_effect_base
+            )
 
         self.base_image = self.current.copy()
 
@@ -1145,45 +1174,41 @@ class FotoFlux:
             )
             return
 
+        self.cancel_pending_preview()
+
         if key == "Original":
 
-            self.reset_image()
+            if self.right_effect_base is None:
+                return
+
+            self.save_undo()
+            self.current = self.right_effect_base.copy()
+            self.base_image = self.current.copy()
+            self.right_effect_base = None
+            self.preview_image = None
+            self.update_live_preview()
+            self.status.config(text="Right-panel effects removed")
             return
 
         self.save_undo()
-
         image = self.current.copy().convert("RGB")
 
         try:
+            result = self.filter_engine(image, key)
 
-            result = self.filter_engine(
-                image,
-                key
-            )
+            if self.right_effect_base is None:
+                self.right_effect_base = self.current.copy()
 
             self.current = result.convert("RGB")
-
             self.base_image = self.current.copy()
-
             self.preview_image = None
-
-            self.reset_slider_values()
-
-            self.update_display()
-
-            self.status.config(
-                text=f"Filter applied: {name}"
-            )
+            self.update_live_preview()
+            self.status.config(text=f"Filter applied: {name}")
 
         except Exception as error:
-
             if self.undo_stack:
                 self.undo_stack.pop()
-
-            messagebox.showerror(
-                "Filter Error",
-                str(error)
-            )
+            messagebox.showerror("Filter Error", str(error))
 
     def filter_engine(self, image, key):
 
@@ -1582,11 +1607,14 @@ class FotoFlux:
             return
 
         self.save_undo()
+
+        if self.right_effect_base is None:
+            self.right_effect_base = self.current.copy()
+
         self.current = result.convert("RGB")
         self.base_image = self.current.copy()
         self.preview_image = None
-        self.reset_slider_values()
-        self.update_display()
+        self.update_live_preview()
         label = "Background Blur" if target == "background" else "Foreground Blur"
         self.status.config(text=f"{label} applied successfully")
 
@@ -1601,14 +1629,16 @@ class FotoFlux:
 
         self.save_undo()
 
-        self.current = self.current.rotate(
-            angle,
-            expand=True
-        )
+        self.current = self.current.rotate(angle, expand=True)
+
+        if self.right_effect_base is not None:
+            self.right_effect_base = self.right_effect_base.rotate(
+                angle, expand=True
+            )
 
         self.base_image = self.current.copy()
-
-        self.update_display()
+        self.preview_image = None
+        self.update_live_preview()
 
     def flip_horizontal(self):
 
@@ -1617,13 +1647,16 @@ class FotoFlux:
 
         self.save_undo()
 
-        self.current = ImageOps.mirror(
-            self.current
-        )
+        self.current = ImageOps.mirror(self.current)
+
+        if self.right_effect_base is not None:
+            self.right_effect_base = ImageOps.mirror(
+                self.right_effect_base
+            )
 
         self.base_image = self.current.copy()
-
-        self.update_display()
+        self.preview_image = None
+        self.update_live_preview()
 
     def flip_vertical(self):
 
@@ -1632,13 +1665,16 @@ class FotoFlux:
 
         self.save_undo()
 
-        self.current = ImageOps.flip(
-            self.current
-        )
+        self.current = ImageOps.flip(self.current)
+
+        if self.right_effect_base is not None:
+            self.right_effect_base = ImageOps.flip(
+                self.right_effect_base
+            )
 
         self.base_image = self.current.copy()
-
-        self.update_display()
+        self.preview_image = None
+        self.update_live_preview()
 
     # --------------------------------------------------
     # RESET
@@ -1654,6 +1690,7 @@ class FotoFlux:
         self.current = self.original.copy()
 
         self.base_image = self.current.copy()
+        self.right_effect_base = None
 
         self.preview_image = None
 

@@ -46,7 +46,7 @@ https://github.com/srdjanbaic/FotoFlux/releases
 
 Install it using:
 
-    sudo apt install ./fotoflux_1.0.0_amd64.deb
+    sudo apt install ./fotoflux_1.0.1_amd64.deb
 
 Launch FotoFlux from your desktop application menu or run:
 
